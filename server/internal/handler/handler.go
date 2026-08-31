@@ -68,6 +68,9 @@ type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
+	// SoloAgentID locks issue ownership to one agent when configured through
+	// MULTICA_SOLO_AGENT_ID. Empty preserves the upstream multi-assignee flow.
+	SoloAgentID string
 	// DisableWorkspaceCreation, when true, makes POST /api/workspaces return
 	// 403 for every caller. There is no role/owner exception because the repo
 	// has no platform-admin concept; operators bootstrap the workspace with
@@ -441,6 +444,10 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	// backs auto-titling. A deployment with no MULTICA_LLM_* configuration gets
 	// a disabled client, which turns the feature off rather than failing.
 	taskSvc.QuickActions = llmClient
+	issueSvc := service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc)
+	issueSvc.SoloAgentID = cfg.SoloAgentID
+	autopilotSvc := service.NewAutopilotService(queries, txStarter, bus, taskSvc)
+	autopilotSvc.SoloAgentID = cfg.SoloAgentID
 	h := &Handler{
 		Queries:                      queries,
 		DB:                           executor,
@@ -452,8 +459,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Bus:                          bus,
 		TaskService:                  taskSvc,
 		PluginService:                service.NewPluginService(queries, txStarter),
-		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
-		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		IssueService:                 issueSvc,
+		AutopilotService:             autopilotSvc,
 		EmailService:                 emailService,
 		UpdateStore:                  NewInMemoryUpdateStore(),
 		ModelListStore:               NewInMemoryModelListStore(),

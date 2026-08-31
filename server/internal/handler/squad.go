@@ -501,10 +501,26 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Transfer issues assigned to this squad to the leader agent.
+	transferAgentID := squad.LeaderID
+	if soloID, enabled, err := h.soloAgentID(); err != nil {
+		writeError(w, http.StatusInternalServerError, "solo mode is misconfigured")
+		return
+	} else if enabled {
+		if status, msg := h.validateAssigneePair(
+			r.Context(), r, workspaceID,
+			pgtype.Text{String: "agent", Valid: true}, soloID,
+			scopeNoDelegation(),
+		); status != 0 {
+			writeError(w, status, msg)
+			return
+		}
+		transferAgentID = soloID
+	}
+
+	// Transfer issues assigned to this squad to its effective successor.
 	if err := h.Queries.TransferSquadAssignees(r.Context(), db.TransferSquadAssigneesParams{
 		AssigneeID:   squad.ID,
-		AssigneeID_2: squad.LeaderID,
+		AssigneeID_2: transferAgentID,
 	}); err != nil {
 		slog.Warn("transfer squad assignees failed", "squad_id", uuidToString(squad.ID), "error", err)
 	}
@@ -513,11 +529,11 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 	// squad. Without this, autopilot.assignee_id would still point at the
 	// archived squad row and every subsequent dispatch would skip with
 	// "assignee squad is archived" — visible to ops but useless to the
-	// owner. Rewriting to the leader keeps the autopilot semantics
-	// unchanged (Path A from MUL-2429 is leader-only execution anyway).
+	// owner. Rewriting to the same effective successor keeps issue and
+	// autopilot ownership aligned.
 	if err := h.Queries.TransferSquadAutopilotsToLeader(r.Context(), db.TransferSquadAutopilotsToLeaderParams{
 		AssigneeID:   squad.ID,
-		AssigneeID_2: squad.LeaderID,
+		AssigneeID_2: transferAgentID,
 	}); err != nil {
 		slog.Warn("transfer squad autopilots failed", "squad_id", uuidToString(squad.ID), "error", err)
 	}

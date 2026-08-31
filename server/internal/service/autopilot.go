@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/solomode"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -40,6 +41,7 @@ type AutopilotService struct {
 	TaskSvc      *TaskService
 	Entitlements entitlement.Provider
 	QuotaMetrics AutopilotQuotaMetrics
+	SoloAgentID  string
 }
 
 // DefaultAutopilotTriggerTimezone is the timezone used to render Autopilot
@@ -52,6 +54,18 @@ const autopilotRecentDuplicateWindow = 60 * time.Second
 
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
+}
+
+func (s *AutopilotService) applySoloAgent(ap db.Autopilot) (db.Autopilot, error) {
+	policy, err := solomode.Parse(s.SoloAgentID)
+	if err != nil {
+		return db.Autopilot{}, err
+	}
+	if policy.Enabled {
+		ap.AssigneeType = "agent"
+		ap.AssigneeID = policy.AgentID
+	}
+	return ap, nil
 }
 
 // autopilotRuleConfigSummary captures the substantive (accountability-bearing)
@@ -177,6 +191,11 @@ func (s *AutopilotService) AdmitAutopilotWebhookDelivery(
 	payload []byte,
 	deliveryID pgtype.UUID,
 ) (*db.AutopilotRun, error) {
+	effective, err := s.applySoloAgent(autopilot)
+	if err != nil {
+		return nil, fmt.Errorf("admit webhook delivery: %w", err)
+	}
+	autopilot = effective
 	if !deliveryID.Valid {
 		return nil, fmt.Errorf("admit webhook delivery: delivery_id is required")
 	}
@@ -307,6 +326,11 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 // moved downstream; otherwise enqueue exactly the same assignee path used by
 // the original dispatch.
 func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, autopilot db.Autopilot, run db.AutopilotRun) error {
+	effective, err := s.applySoloAgent(autopilot)
+	if err != nil {
+		return fmt.Errorf("dispatch for webhook delivery: %w", err)
+	}
+	autopilot = effective
 	tasks, err := s.Queries.ListTasksByIssue(ctx, run.IssueID)
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: inspect issue tasks: %w", err)
@@ -522,6 +546,11 @@ func (s *AutopilotService) dispatchAutopilot(
 	actorUserID pgtype.UUID,
 	idempotencyKey string,
 ) (*db.AutopilotRun, dispatch.ReasonCode, error) {
+	effective, err := s.applySoloAgent(autopilot)
+	if err != nil {
+		return nil, dispatch.ReasonInternalError, err
+	}
+	autopilot = effective
 	if reason, code, skip := s.shouldSkipDispatch(ctx, autopilot, actorUserID); skip {
 		run, err := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, reason)
 		return run, code, err
@@ -571,6 +600,11 @@ func (s *AutopilotService) dispatchAutopilotRun(
 	run *db.AutopilotRun,
 	actorUserID pgtype.UUID,
 ) (*db.AutopilotRun, dispatch.ReasonCode, error) {
+	effective, err := s.applySoloAgent(autopilot)
+	if err != nil {
+		return run, dispatch.ReasonInternalError, err
+	}
+	autopilot = effective
 	switch autopilot.ExecutionMode {
 	case "create_issue":
 		triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, triggerID)
@@ -1408,7 +1442,9 @@ var errSquadArchived = errors.New("squad is archived")
 func (s *AutopilotService) resolveAutopilotLeader(ctx context.Context, ap db.Autopilot) (agent db.Agent, squadResolved bool, err error) {
 	switch ap.AssigneeType {
 	case "", "agent":
-		agent, err = s.Queries.GetAgent(ctx, ap.AssigneeID)
+		agent, err = s.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID: ap.AssigneeID, WorkspaceID: ap.WorkspaceID,
+		})
 		return agent, false, err
 	case "squad":
 		squad, err := s.Queries.GetSquad(ctx, ap.AssigneeID)

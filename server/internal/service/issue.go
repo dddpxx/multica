@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/solomode"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -44,6 +45,8 @@ type IssueService struct {
 	// Entitlements supplies Cloud's effective issue-count instruction. Nil is
 	// the self-hosted unlimited path.
 	Entitlements entitlement.Provider
+	// SoloAgentID overrides assignees for every create routed through this service.
+	SoloAgentID string
 }
 
 func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.Client, ts *TaskService) *IssueService {
@@ -212,6 +215,14 @@ type IssueCreateResult struct {
 // Caller-owned validation is limited to transport-shaped checks: title
 // required, RFC3339 date format, assignee pair sanity.
 func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
+	policy, err := solomode.Parse(s.SoloAgentID)
+	if err != nil {
+		return IssueCreateResult{}, err
+	}
+	if policy.Enabled {
+		p.AssigneeType = pgtype.Text{String: "agent", Valid: true}
+		p.AssigneeID = policy.AgentID
+	}
 	issueCountPolicy := ResolveIssueCountPolicy(ctx, s.Entitlements, p.WorkspaceID)
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
@@ -219,6 +230,17 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+	if policy.Enabled {
+		agent, err := qtx.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID: policy.AgentID, WorkspaceID: p.WorkspaceID,
+		})
+		if err != nil {
+			return IssueCreateResult{}, fmt.Errorf("solo agent is not available in this workspace: %w", err)
+		}
+		if agent.ArchivedAt.Valid {
+			return IssueCreateResult{}, errors.New("solo agent is archived")
+		}
+	}
 
 	if p.SourceContext != nil {
 		if _, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{

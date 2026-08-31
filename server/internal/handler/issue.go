@@ -2460,6 +2460,13 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		dueDate = parsed.Time.Format("2006-01-02")
 	}
+	if soloID, enabled, err := h.soloAgentID(); err != nil {
+		writeError(w, http.StatusInternalServerError, "solo mode is misconfigured")
+		return
+	} else if enabled {
+		req.AgentID = uuidToString(soloID)
+		req.SquadID = ""
+	}
 
 	hasAgent := strings.TrimSpace(req.AgentID) != ""
 	hasSquad := strings.TrimSpace(req.SquadID) != ""
@@ -2814,15 +2821,23 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var assigneeType pgtype.Text
 	var assigneeID pgtype.UUID
-	if req.AssigneeType != nil {
-		assigneeType = pgtype.Text{String: *req.AssigneeType, Valid: true}
-	}
-	if req.AssigneeID != nil {
-		id, ok := parseUUIDOrBadRequest(w, *req.AssigneeID, "assignee_id")
-		if !ok {
-			return
+	if soloID, enabled, err := h.soloAgentID(); err != nil {
+		writeError(w, http.StatusInternalServerError, "solo mode is misconfigured")
+		return
+	} else if enabled {
+		assigneeType = pgtype.Text{String: "agent", Valid: true}
+		assigneeID = soloID
+	} else {
+		if req.AssigneeType != nil {
+			assigneeType = pgtype.Text{String: *req.AssigneeType, Valid: true}
 		}
-		assigneeID = id
+		if req.AssigneeID != nil {
+			id, ok := parseUUIDOrBadRequest(w, *req.AssigneeID, "assignee_id")
+			if !ok {
+				return
+			}
+			assigneeID = id
+		}
 	}
 
 	var parentIssueID pgtype.UUID
@@ -3671,6 +3686,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 // callers should treat any non-zero status as a rejection and surface it back
 // to the client.
 func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, workspaceID string, assigneeType pgtype.Text, assigneeID pgtype.UUID, scope assignAuthorityScope) (int, string) {
+	if status, msg := h.validateSoloAssigneePair(assigneeType, assigneeID); status != 0 {
+		return status, msg
+	}
 	// Both unset → unassigned issue, valid.
 	if !assigneeType.Valid && !assigneeID.Valid {
 		return 0, ""
@@ -4253,7 +4271,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		_, batchTouchedType := rawUpdates["assignee_type"]
 		_, batchTouchedID := rawUpdates["assignee_id"]
 		if batchTouchedType || batchTouchedID {
-			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID, scopeExistingIssue(&prevIssue)); status != 0 {
+			if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID, scopeExistingIssue(&prevIssue)); status >= 500 {
+				writeError(w, status, msg)
+				return
+			} else if status != 0 {
 				continue
 			}
 		}

@@ -70,6 +70,7 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 | `ALLOWED_EMAIL_DOMAINS` | Optional comma-separated allowlist of email domains |
 | `ALLOWED_EMAILS` | Optional comma-separated allowlist of exact email addresses |
 | `DISABLE_WORKSPACE_CREATION` | Set to `true` to make `POST /api/workspaces` return 403 for every caller — users can only join workspaces they were invited to |
+| `MULTICA_SOLO_AGENT_ID` | Optional agent UUID that routes standard, Quick Create, and Autopilot work to one executor and blocks reassignment, Squad assignment, and other-agent mentions |
 
 Changes take effect after restarting the backend / compose stack. The web UI reads `ALLOW_SIGNUP` and `DISABLE_WORKSPACE_CREATION` from `/api/config` at runtime, so no web rebuild is needed.
 

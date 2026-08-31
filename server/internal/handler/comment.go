@@ -3078,6 +3078,17 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		})
 	}
 	for _, m := range mentions {
+		if m.Type == "agent" || m.Type == "squad" {
+			allowed, err := h.soloMentionAllowed(m.Type, m.ID)
+			if err != nil {
+				blockTarget(m.Type, m.ID, ReasonInternalError)
+				continue
+			}
+			if !allowed {
+				blockTarget(m.Type, m.ID, ReasonInvocationNotAllowed)
+				continue
+			}
+		}
 		if m.Type == "squad" {
 			// @squad mention → trigger the squad's leader agent.
 			// The mention id comes from untrusted comment text and MentionRe
