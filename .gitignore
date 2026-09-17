@@ -66,6 +66,9 @@ _features/
 # runtime
 *.pid
 
+# local database backups (scripts/daily-db-backup.ps1)
+/backups/
+
 # platform specific
 *.dmg
 *.app
