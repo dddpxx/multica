@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -938,9 +939,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	if execPath == "" {
 		execPath = "codex"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	lookedUp, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("codex executable not found at %q: %w", execPath, err)
 	}
+	execPath = resolveCodexNativeExecutable(lookedUp)
 
 	timeout := opts.Timeout
 	semanticInactivityTimeout := opts.SemanticInactivityTimeout
@@ -1759,6 +1762,34 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// resolveCodexNativeExecutable bypasses npm's codex.cmd wrapper on Windows.
+// The wrapper opens cmd.exe before starting Node and the bundled native Codex;
+// launching that native executable directly removes the console-window hop.
+func resolveCodexNativeExecutable(shimPath string) string {
+	if runtime.GOOS != "windows" {
+		return shimPath
+	}
+	ext := filepath.Ext(shimPath)
+	if !strings.EqualFold(strings.TrimSuffix(filepath.Base(shimPath), ext), "codex") ||
+		(ext != "" && !strings.EqualFold(ext, ".cmd") && !strings.EqualFold(ext, ".ps1")) {
+		return shimPath
+	}
+	pkg, triple := "codex-win32-x64", "x86_64-pc-windows-msvc"
+	if runtime.GOARCH == "arm64" {
+		pkg, triple = "codex-win32-arm64", "aarch64-pc-windows-msvc"
+	}
+	prefix := filepath.Dir(shimPath)
+	for _, candidate := range []string{
+		filepath.Join(prefix, "node_modules", "@openai", "codex", "node_modules", "@openai", pkg, "vendor", triple, "bin", "codex.exe"),
+		filepath.Join(prefix, "node_modules", "@openai", pkg, "vendor", triple, "bin", "codex.exe"),
+	} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return shimPath
 }
 
 // The continuity notice this backend prepends is supplied by the caller via

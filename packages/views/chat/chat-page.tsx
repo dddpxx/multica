@@ -257,6 +257,7 @@ export function ChatPage() {
         <ChatMessageList
           key={c.activeSessionId}
           messages={c.messages}
+          assistantContentOnly={c.activeAgent?.name.trim().toLowerCase() === "eric"}
           pendingTask={c.pendingTask}
           availability={c.availability}
           firstItemIndex={c.firstItemIndex}

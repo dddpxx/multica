@@ -767,6 +767,50 @@ func seedRunOnlyAutopilot(t *testing.T, pool *pgxpool.Pool, workspaceID, agentID
 	return autopilotID, runID
 }
 
+func TestDispatchRunOnlyRoutesConfiguredOutputToChat(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+	autopilotID, runID := seedRunOnlyAutopilot(t, pool, workspaceID, agentID, userID)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	var chatSessionID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
+		VALUES ($1, $2, $3, 'Eric') RETURNING id`, workspaceID, agentID, userID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("seed chat session: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE autopilot SET chat_session_id = $2 WHERE id = $1`, autopilotID, chatSessionID); err != nil {
+		t.Fatalf("configure chat delivery: %v", err)
+	}
+
+	q := db.New(tx)
+	svc := &AutopilotService{Queries: q, TxStarter: tx, Bus: events.New(), TaskSvc: &TaskService{Queries: q, TxStarter: tx, Bus: events.New()}}
+	ap, err := q.GetAutopilot(ctx, util.MustParseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("get autopilot: %v", err)
+	}
+	run, err := q.GetAutopilotRun(ctx, util.MustParseUUID(runID))
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if err := svc.dispatchRunOnly(ctx, ap, &run, util.MustParseUUID(userID)); err != nil {
+		t.Fatalf("dispatchRunOnly: %v", err)
+	}
+
+	var routed pgtype.UUID
+	if err := tx.QueryRow(ctx, `SELECT chat_session_id FROM agent_task_queue WHERE autopilot_run_id = $1`, run.ID).Scan(&routed); err != nil {
+		t.Fatalf("read chat routing: %v", err)
+	}
+	if !routed.Valid || routed.Bytes != util.MustParseUUID(chatSessionID).Bytes {
+		t.Fatalf("chat_session_id = %s, want %s", util.UUIDToString(routed), chatSessionID)
+	}
+}
+
 // TestDispatchRunOnlyScheduleStampsRuleOwnerRow is the run_only row assertion Elon
 // asked for: the direct CreateAutopilotTask path (no member actor → schedule-like)
 // must persist rule_owner on the queue row — originator NULL, accountable = the

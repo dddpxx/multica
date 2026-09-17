@@ -919,6 +919,7 @@ export function ChatWindow() {
         <ChatMessageList
           key={activeSessionId}
           messages={messages}
+          assistantContentOnly={activeAgent?.name.trim().toLowerCase() === "eric"}
           pendingTask={pendingTask}
           availability={availability}
           firstItemIndex={firstItemIndex}

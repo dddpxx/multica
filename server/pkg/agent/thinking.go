@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -318,6 +319,9 @@ type codexDebugServiceTier struct {
 func discoverCodexModels(ctx context.Context, cmd Command) []Model {
 	if cmd.Path == "" {
 		cmd.Path = "codex"
+	}
+	if lookedUp, err := exec.LookPath(cmd.Path); err == nil {
+		cmd.Path = resolveCodexNativeExecutable(lookedUp)
 	}
 	version, err := DetectVersion(ctx, cmd)
 	if err != nil || !codexSupportsDebugModels(version) {

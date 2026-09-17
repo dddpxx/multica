@@ -167,6 +167,7 @@ describe("setupAutoUpdater", () => {
     ctx.downloadUpdate.mockClear();
     ctx.quitAndInstall.mockClear();
     ctx.getVersion.mockClear();
+    ctx.getVersion.mockReturnValue("0.3.17");
   });
 
   afterEach(() => {
@@ -184,6 +185,33 @@ describe("setupAutoUpdater", () => {
 
     await vi.advanceTimersByTimeAsync(5_000);
     expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks every official update entry point in a local customized build", async () => {
+    ctx.getVersion.mockReturnValue("0.4.37-local");
+
+    setupAutoUpdater(() => null);
+
+    await expect(invokeIpc("updater:get-preferences")).resolves.toEqual({
+      automaticUpdates: false,
+    });
+    await expect(
+      invokeIpc("updater:set-automatic-updates", true),
+    ).resolves.toEqual({ automaticUpdates: false });
+    await expect(invokeIpc("updater:check")).resolves.toMatchObject({
+      ok: false,
+    });
+    await expect(invokeIpc("updater:download")).rejects.toThrow(
+      "本地定制版已锁定官方更新",
+    );
+    await expect(invokeIpc("updater:install")).rejects.toThrow(
+      "本地定制版已锁定官方更新",
+    );
+
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000 + 5_000);
+    expect(ctx.checkForUpdates).not.toHaveBeenCalled();
+    expect(ctx.downloadUpdate).not.toHaveBeenCalled();
+    expect(ctx.quitAndInstall).not.toHaveBeenCalled();
   });
 
   it("skips startup and periodic checks when automatic updates are disabled", async () => {

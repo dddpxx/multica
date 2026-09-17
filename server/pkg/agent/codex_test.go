@@ -20,6 +20,34 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
+func TestResolveCodexNativeExecutableSkipsWindowsNpmShim(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows npm shim layout")
+	}
+	prefix := t.TempDir()
+	pkg, triple := "codex-win32-x64", "x86_64-pc-windows-msvc"
+	if runtime.GOARCH == "arm64" {
+		pkg, triple = "codex-win32-arm64", "aarch64-pc-windows-msvc"
+	}
+	native := filepath.Join(prefix, "node_modules", "@openai", "codex", "node_modules", "@openai", pkg, "vendor", triple, "bin", "codex.exe")
+	if err := os.MkdirAll(filepath.Dir(native), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(native, []byte("native"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"codex", "codex.cmd", "codex.ps1"} {
+		shim := filepath.Join(prefix, name)
+		if err := os.WriteFile(shim, []byte("shim"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := resolveCodexNativeExecutable(shim); got != native {
+			t.Fatalf("resolveCodexNativeExecutable(%q) = %q, want %q", name, got, native)
+		}
+	}
+}
+
 func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
 	t.Helper()
 	fs := &fakeStdin{}

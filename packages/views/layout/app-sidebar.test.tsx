@@ -349,6 +349,15 @@ describe("personal nav — Chat", () => {
   const chatBadge = (container: HTMLElement) =>
     chatNav(container)?.querySelector("number-flow-react") ?? null;
 
+  it("shows Chat before Inbox in the personal navigation", () => {
+    const { container } = render(<AppSidebar />);
+    const personalRoutes = [...container.querySelectorAll<HTMLElement>("button[data-href]")]
+      .map((button) => button.dataset.href)
+      .filter((href) => href === "/acme/chat" || href === "/acme/inbox");
+
+    expect(personalRoutes).toEqual(["/acme/chat", "/acme/inbox"]);
+  });
+
   it("keeps persistent Inbox and Chat counters static", () => {
     inboxItems.current = [{ id: "inbox-1", read: false }];
     chatSessions.current = [{ id: "chat-1", unread_count: 2 }];

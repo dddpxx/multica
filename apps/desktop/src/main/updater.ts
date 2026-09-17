@@ -110,6 +110,29 @@ function checkForUpdatesOnce(): Promise<unknown> {
 }
 
 export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
+  if (app.getVersion().includes("-local")) {
+    const error = "本地定制版已锁定官方更新；请合并官方源码后重新构建。";
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = false;
+    ipcMain.handle("updater:download", async () => {
+      throw new Error(error);
+    });
+    ipcMain.handle("updater:install", async () => {
+      throw new Error(error);
+    });
+    ipcMain.handle("updater:get-preferences", () => ({
+      automaticUpdates: false,
+    }));
+    ipcMain.handle("updater:set-automatic-updates", () => ({
+      automaticUpdates: false,
+    }));
+    ipcMain.handle("updater:check", (): ManualUpdateCheckResult => ({
+      ok: false,
+      error,
+    }));
+    return;
+  }
+
   const preferencesFilePath = updaterPreferencesPath(app.getPath("userData"));
   let automaticUpdatesEnabled =
     DEFAULT_UPDATER_PREFERENCES.automaticUpdates;

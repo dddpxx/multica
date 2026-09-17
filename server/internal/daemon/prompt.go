@@ -169,14 +169,14 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 }
 
 func buildPromptBody(task Task, provider string) string {
+	if task.AutopilotRunID != "" {
+		return buildAutopilotPrompt(task)
+	}
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
 	if task.TriggerCommentID != "" {
 		return buildCommentPrompt(task, provider)
-	}
-	if task.AutopilotRunID != "" {
-		return buildAutopilotPrompt(task)
 	}
 	if task.QuickCreatePrompt != "" {
 		return buildQuickCreatePrompt(task)

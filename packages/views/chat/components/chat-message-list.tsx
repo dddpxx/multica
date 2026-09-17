@@ -59,6 +59,8 @@ import { useT } from "../../i18n";
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
+  /** Render assistant turns as settled reply content only. */
+  assistantContentOnly?: boolean;
   /**
    * Server-authoritative pending-task snapshot. `null` / undefined means
    * no in-flight task — list renders without StatusPill.
@@ -173,6 +175,7 @@ const LIST_COMPONENTS: Components<ChatRenderItem, ChatListContext> = {
 
 export function ChatMessageList({
   messages,
+  assistantContentOnly = false,
   pendingTask,
   availability,
   firstItemIndex = 0,
@@ -249,8 +252,10 @@ export function ChatMessageList({
     ...taskMessagesOptions(pendingTaskId ?? ""),
     enabled: canFetchLiveTimeline,
   });
-  const hasLive = showLiveTimeline && (liveTaskMessages?.length ?? 0) > 0;
-  const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
+  const hasLive =
+    !assistantContentOnly && showLiveTimeline && (liveTaskMessages?.length ?? 0) > 0;
+  const showStatusPill =
+    !assistantContentOnly && !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
 
   // Persisted messages plus, while a task is in flight, one synthetic trailing
   // row for it. When the assistant message persists, `hasLive` goes false and
@@ -368,6 +373,7 @@ export function ChatMessageList({
             <MessageBubble
               item={item}
               isPending={!!pendingTaskId && item.taskId === pendingTaskId}
+              assistantContentOnly={assistantContentOnly}
               transformContent={transformContent}
               onQuickAction={onQuickAction}
               quickActionsDisabled={quickActionsDisabled}
@@ -433,6 +439,7 @@ function ChatSkeletonBody() {
 const MessageBubble = memo(function MessageBubble({
   item,
   isPending,
+  assistantContentOnly,
   transformContent,
   onQuickAction,
   quickActionsDisabled,
@@ -443,6 +450,7 @@ const MessageBubble = memo(function MessageBubble({
 }: {
   item: ChatRenderItem;
   isPending: boolean;
+  assistantContentOnly: boolean;
   transformContent?: (content: string) => string;
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
   quickActionsDisabled: boolean;
@@ -459,6 +467,7 @@ const MessageBubble = memo(function MessageBubble({
       <AssistantMessage
         taskId={item.taskId}
         isPending={isPending}
+        contentOnly={assistantContentOnly}
         transformContent={transformContent}
         onQuickAction={onQuickAction}
         quickActionsDisabled={quickActionsDisabled}
@@ -498,6 +507,7 @@ const MessageBubble = memo(function MessageBubble({
       taskId={message.task_id ?? null}
       message={message}
       isPending={isPending}
+      contentOnly={assistantContentOnly}
       transformContent={transformContent}
       onQuickAction={onQuickAction}
       quickActionsDisabled={quickActionsDisabled}
@@ -530,6 +540,7 @@ function AssistantMessage({
   taskId,
   message,
   isPending,
+  contentOnly,
   transformContent,
   onQuickAction,
   quickActionsDisabled,
@@ -541,6 +552,7 @@ function AssistantMessage({
   taskId: string | null;
   message?: ChatMessage;
   isPending: boolean;
+  contentOnly: boolean;
   transformContent?: (content: string) => string;
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
   quickActionsDisabled: boolean;
@@ -557,7 +569,7 @@ function AssistantMessage({
   // task finishes, since WS already populated it.
   const { data: taskMessages } = useQuery({
     ...taskMessagesOptions(taskId ?? ""),
-    enabled: canFetchTaskMessages,
+    enabled: canFetchTaskMessages && !contentOnly,
   });
 
   // Memoized on the cache array identity: mergeTaskMessagesBySeq preserves the
@@ -583,7 +595,29 @@ function AssistantMessage({
         rawError={message.content}
         timeline={timeline}
         elapsedMs={message.elapsed_ms}
+        contentOnly={contentOnly}
       />
+    );
+  }
+
+  if (contentOnly) {
+    if (!message) return null;
+    return (
+      <div className="flex justify-start">
+        <div className="rounded-2xl bg-muted px-3.5 py-2 text-body max-w-[80%] break-words">
+          <RichContent
+            content={message.content}
+            attachments={message.attachments}
+            density="compact"
+            phase="settled"
+            className="leading-relaxed"
+          />
+          <AttachmentList
+            attachments={message.attachments}
+            content={message.content}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -939,11 +973,13 @@ function FailureBubble({
   rawError,
   timeline,
   elapsedMs,
+  contentOnly = false,
 }: {
   reason: string;
   rawError: string;
   timeline: ChatTimelineItem[];
   elapsedMs?: number | null;
+  contentOnly?: boolean;
 }) {
   const { t } = useT("chat");
   const [open, setOpen] = useState(false);
@@ -1005,7 +1041,7 @@ function FailureBubble({
         <AlertTriangle className="size-3.5 shrink-0 text-destructive mt-0.5" />
         <div className="flex-1 min-w-0">
           <div className="text-destructive">{label}</div>
-          {rawError.trim() && (
+          {!contentOnly && rawError.trim() && (
             <Collapsible open={open} onOpenChange={setOpen}>
               <CollapsibleTrigger className="mt-0.5 flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
                 {open ? (
@@ -1024,8 +1060,8 @@ function FailureBubble({
           )}
         </div>
       </div>
-      {timeline.length > 0 && <TimelineView items={timeline} />}
-      {elapsedMs != null && (
+      {!contentOnly && timeline.length > 0 && <TimelineView items={timeline} />}
+      {!contentOnly && elapsedMs != null && (
         <ElapsedCaption variant="failed" elapsedMs={elapsedMs} />
       )}
     </div>

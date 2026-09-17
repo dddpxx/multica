@@ -331,6 +331,79 @@ describe("ChatMessageList quick actions", () => {
   });
 });
 
+describe("ChatMessageList content-only replies", () => {
+  it("renders only the persisted assistant content", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "text", { content: "Checking context." }),
+      taskMsg(1, "thinking", { content: "private reasoning" }),
+      taskMsg(2, "tool_use", { tool: "Bash", input: { command: "pwd" } }),
+      taskMsg(3, "tool_result", { tool: "Bash", output: "ok" }),
+      taskMsg(4, "text", { content: "Just the answer." }),
+    ]);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "assistant-content-only",
+                chat_session_id: "session-1",
+                role: "assistant",
+                content: "Just the answer.",
+                task_id: TASK_ID,
+                created_at: "2026-09-02T00:00:00Z",
+                elapsed_ms: 12_000,
+                quick_actions: [{ label: "Continue", prompt: "Continue" }],
+              },
+            ]}
+            pendingTask={null}
+            availability="online"
+            onQuickAction={vi.fn()}
+            assistantContentOnly
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const reply = await screen.findByText("Just the answer.");
+    expect(reply).toBeInTheDocument();
+    expect(reply.closest(".rounded-2xl")).toHaveClass(
+      "bg-muted",
+      "max-w-[80%]",
+    );
+    expect(screen.queryByText("Checking context.")).not.toBeInTheDocument();
+    expect(screen.queryByText("private reasoning")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    expect(screen.queryByText("12s")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy reply" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  });
+
+  it("hides live task status and process output until the reply is persisted", () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), INITIAL_MESSAGES);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={{ task_id: TASK_ID, status: "running" }}
+            availability="online"
+            assistantContentOnly
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(screen.queryByText("Looking into it.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    expect(screen.queryByText(/working|thinking|running/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("ChatMessageList quick actions skeleton", () => {
   const assistantMessage = {
     id: "assistant-1",

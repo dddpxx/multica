@@ -1728,6 +1728,18 @@ func TestTurnModeMarkersRetired(t *testing.T) {
 	}
 }
 
+func TestAutopilotChatDeliveryKeepsAutopilotPrompt(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildPromptBody(Task{
+		ChatSessionID:  "chat-1",
+		AutopilotRunID: "run-1",
+	}, "claude")
+	if !strings.Contains(prompt, "Autopilot run ID: run-1") {
+		t.Fatalf("autopilot delivered to chat used the chat prompt instead\n---\n%s", prompt)
+	}
+}
+
 // The brief must not carry the retired mode router either — end-to-end through
 // InjectRuntimeConfig, so a reintroduction anywhere in the assembled brief
 // fails here even if the workflow section itself stays clean.
