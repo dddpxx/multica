@@ -5,6 +5,8 @@
   - WSL2/虚拟化功能显示"已启用"但要重启一次才真正生效（仅自托管 Docker 需要，云端可跳过）
   - Node 26+ 不再自带 corepack，需要 npm install -g corepack
   - npm 全局装 @anthropic-ai/claude-code 需要 --allow-scripts 放行 postinstall
+  - npm 全局目录必须写进【系统级】PATH：只加用户级时，Multica 桌面客户端拉起
+    daemon 会报 "no agent CLI found"，重开客户端也不一定能好（见 4b 步）
   - Electron/大文件下载走 GitHub CDN 在国内很慢，可配 ELECTRON_MIRROR（仅自托管才会触发）
   - PowerShell 传中文参数给原生 exe 容易编码错乱，凡是长文本一律走文件/REST API，不走命令行参数
 
@@ -54,6 +56,31 @@ npm install -g @openai/codex
 $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 Write-Output "claude 版本: $(claude --version 2>&1)"
 Write-Output "codex 版本: $(codex --version 2>&1)"
+
+Section "4b/6 把 npm 全局目录写进【系统级】PATH（关键，别只加用户级）"
+# 为什么必须是系统级：Multica 桌面客户端会用它自己进程的环境去拉起 daemon。
+# 只加用户级 PATH 时，桌面客户端（以及任何在改 PATH 之前就启动的长驻进程）
+# 看不到 claude/codex，daemon 启动直接失败并报 "no agent CLI found"，
+# 而且重开客户端也未必能解决。写进系统级后，任何新进程都能看到。
+$npmDir = Join-Path $env:APPDATA "npm"
+$machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+if ($machinePath -notlike "*$npmDir*") {
+    $backupDir = Join-Path $PSScriptRoot "..\backups"
+    New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+    $backupFile = Join-Path $backupDir "machine-path-backup-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
+    [System.IO.File]::WriteAllText($backupFile, $machinePath, [System.Text.Encoding]::UTF8)
+    Write-Output "已备份当前系统 PATH 到: $backupFile"
+
+    $inner = "`$p = [Environment]::GetEnvironmentVariable('Path','Machine'); if (`$p -notlike '*$npmDir*') { [Environment]::SetEnvironmentVariable('Path', `$p.TrimEnd(';') + ';$npmDir', 'Machine') }"
+    $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($inner))
+    Write-Output "即将弹出 UAC 提权确认框（写系统级 PATH 需要管理员权限），请点“是”。"
+    Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -EncodedCommand $encoded" -Verb RunAs -Wait
+    $after = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    Write-Output "系统级 PATH 已包含 npm 目录: $($after -like "*$npmDir*")"
+} else {
+    Write-Output "系统级 PATH 已包含 npm 目录，跳过。"
+}
+
 Write-Output ""
 Write-Output "接下来需要你手动登录一次（浏览器授权），本脚本不会自动帮你点：
   claude auth login
