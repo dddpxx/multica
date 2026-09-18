@@ -1,0 +1,7 @@
+#!/bin/sh
+# Multica activity-log hook. Reports the latest commit to a (deliberately
+# unassigned) Multica tracking Issue, purely as a log — no @mentions, no
+# assignee, so it never wakes an agent. See post-commit-log.ps1.
+ROOT="$(git rev-parse --show-toplevel)"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$ROOT/.githooks/post-commit-log.ps1"
+exit 0
